@@ -4,6 +4,6 @@ Optional, JD (Job Description)-specific extensions that bolt onto an existing `p
 
 One subfolder per augment topic, named after the technology/theme, e.g.:
 
-- `snowflake-cortex-genai/` — Snowflake Cortex, RAG (Retrieval-Augmented Generation), and Agentic AI, bolted onto `project-stories/fintech/`'s Gold warehouse layer
+- `snowflake-cortex-genai/` — Snowflake Cortex, RAG (Retrieval-Augmented Generation), and Cortex Agents, bolted onto `project-stories/fintech/` (Gold layer plus a new loan-agreement document source)
 
 Read `RULES.md` before creating or editing any file here.
