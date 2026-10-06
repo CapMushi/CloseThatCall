@@ -71,7 +71,7 @@ flowchart LR
 | **Covers** | Rate, term, principal, plus the borrower's name to confirm the PDF belongs to that loan | The whole agreement: prepayment, late fees, fixed vs variable, APR, … |
 | **Output** | A mismatch list and a Slack alert | An answer that quotes the clause and names the PDF |
 
-- **The search index is a knowledge base of signed loan agreements only.** That's deliberate: there are no policies or other documents in it, and only credit ops and compliance can search it, because agreements contain personal details. The search branch is the RAG (Retrieval-Augmented Generation) part.
+- **The search index is a knowledge base of signed loan agreements only.** That's deliberate: there are no policies or other documents in it, and only credit ops (credit operations, the team that sets up and maintains loans in Mambu) and compliance can search it, because agreements contain personal details. The search branch is the RAG (Retrieval-Augmented Generation) part.
 - **Its limit:** search returns the few best-matching passages. It answers "what does *this* contract say?", but not "*how many* contracts say X?". For a count across all loans, extract that field into a table (as check step 2 does) and count it with SQL (Structured Query Language) or Cortex Analyst.
 
 ## Check branch, step by step
@@ -109,7 +109,6 @@ AI_EXTRACT(
 - **No chunks, no search, no AI here.** It's plain SQL comparing numbers.
 - **The join:** a join lines up two tables wherever they share a key. This model joins step 2's `docs.loan_agreement_terms` (what the contract says) to `gold.dim_loan` (Mambu's terms, one row per loan, arriving through the normal pipeline) on the loan ID. It then compares each pair: the rate must match to two decimals, and term and principal must match exactly.
 - **Output:** one row per disagreeing field, with columns `loan_id, field, contract_value, mambu_value, status`.
-- **Borrower-name check:** the extracted borrower name is compared with the Mambu loan's customer name, ignoring case and punctuation. If they differ, the PDF is probably attached to the wrong loan (an ID typo), so the loan gets a single `borrower_name` row with status `wrong_link` for review, instead of a mismatch on every field.
 - **`open` → `resolved`:** credit ops corrects Mambu. On the next nightly run the values match, so the row is marked `resolved` automatically.
 - **The test and the alert:** a dbt (data build tool) test checks for unresolved rows (`open` or `wrong_link`). A dbt test can only pass, warn, or fail:
   - With `severity: error`, the nightly run would stop. Gold wouldn't publish, and every finance dashboard would show yesterday's numbers.

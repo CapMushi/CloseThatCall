@@ -4,9 +4,9 @@
 
 ## Why an agent
 
-Many real questions need both use cases at once. *Example from credit ops:* "Of our 10 largest small-business loans, which have an open term mismatch, and what does each signed agreement say about the rate?"
+Many real questions need both use cases at once. *Example from credit ops* (credit operations: the team that sets up loans in Mambu, keeps them matching the signed contract, and fixes mistakes): "Of our 10 largest small-business loans, which have an open term mismatch, and what does each signed agreement say about the rate?"
 
-In the old Streamlit app, that meant:
+In the old Streamlit app, each tab did one job. "Ask Finance" answered numbers questions; "Loan Review" read one loan's contract. Neither could do the other's job, so that question meant:
 1. Ask the "Ask Finance" tab for the list.
 2. Copy each loan ID.
 3. Paste it into the "Loan Review" tab, ten times over.
@@ -21,6 +21,8 @@ Cortex Agents is a managed Snowflake service. Given a question, the agent repeat
 - **Reflect:** check the results, then retry, ask the user, or respond.
 
 Snowflake runs this loop. We write no orchestration code.
+
+It's the same pattern as LangChain or LangGraph, where you write the loop and each tool in Python and host it yourself. We chose the managed version because our data and both tools already live in Snowflake.
 
 The JD (Job Description)'s "Planner–Tool–Executor–Refiner" is the same loop under different names:
 - **Planner** = plan.
@@ -45,6 +47,7 @@ $$;
 ```
 
 - **`orchestration: auto`** lets Snowflake pick the best available model to run the loop.
+- **`tool_resources`** points each tool at what `01` and `02` already built: `finance_analyst` uses the same `finance_semantic_view`, and `loan_agreements` the same search service. The agent adds no new data or logic.
 - **Tool `description`s** are what the agent reads when deciding which tool fits a question, so they name exactly what each tool covers.
 - **The instructions** encode our two hard rules: numbers only from certified Gold, and contract wording only from the retrieved text.
 
@@ -70,7 +73,10 @@ Step 4 is what the two-tab app could never do: notice a wrong result and fix it 
 
 **Why we moved:**
 - **One chat:** users stop choosing a tab; the agent routes each question.
-- **Streamlit would have needed a rebuild anyway:** Cortex Agents aren't supported in Streamlit's warehouse runtime (it needs the container runtime), so putting the agent in our app meant rebuilding it regardless.
+- **Streamlit would have needed a rebuild anyway:**
+  - Streamlit in Snowflake runs an app one of two ways. Ours used the warehouse runtime (each viewer gets their own copy of the app). The other is the container runtime (one shared copy, running in a container).
+  - Cortex Agents can't be called from the warehouse runtime, so adding the agent meant migrating and rebuilding our app.
+  - If we had to rebuild anyway, CoWork already was the chat app we'd be building.
 - **CoWork has what we'd otherwise build:**
   - CoWork is Snowflake's chat app for agents, renamed from Snowflake Intelligence in 2026.
   - Built in: agents shared by Snowflake role, Cortex AI Guardrails, and request monitoring.
@@ -85,6 +91,7 @@ Step 4 is what the two-tab app could never do: notice a wrong result and fix it 
 
 ## Access control
 
+- **Two checks, both required:** may this user use the agent, and may their role read what each tool touches? The agent has no access of its own.
 - **Required roles:** users need the `SNOWFLAKE.CORTEX_AGENT_USER` database role plus `USAGE` on the agent.
 - **The agent runs as the asking user's role**, so every existing permission and column mask still applies, including the KYC (Know Your Customer) column masks from `03-processing-spark-databricks.md`.
 - **Who gets the full agent:** according to Snowflake's docs, a missing privilege on any of the agent's tools makes the whole request fail with an access error, rather than quietly skipping that tool. So `finance_lending_assistant` is granted only to roles holding both tool privileges: credit ops, compliance, and finance leads (confirm).
@@ -98,16 +105,24 @@ Step 4 is what the two-tab app could never do: notice a wrong result and fix it 
   - Account-wide, by `ACCOUNTADMIN`, through the `AI_SETTINGS` account parameter (advanced prompt-injection detection).
   - Every scan, with its cost, is logged in the `CORTEX_AI_GUARDRAILS_USAGE_HISTORY` view.
   - It's generally available for Cortex Agents and CoWork since May 2026.
+- **Guardrails reduce the risk; they don't remove it.** So we also limited what a hijacked agent could do:
+  - It has no tool that changes anything. It can't edit Mambu, approve a loan, or send a message, so the worst case is a wrong answer.
+  - It only has the asking user's access (see Access control).
+  - "Is this loan mismatched?" comes from `gold.loan_terms_mismatch`, a SQL table, not from the agent reading a PDF. Text injected into a search result can't change it.
+  - Every contract answer quotes its passage and names the PDF, so a reader can check it.
 
 ## Evaluation and monitoring
 
 - **Test set:** 60 questions (confirm): 20 numbers-only, 20 contract-only, 20 needing both. Each lists the expected tools and the expected answer.
 - **Cortex Agent evaluations: the GPA (Goal–Plan–Action) framework.**
-  - It scores each stage separately: did the agent understand the goal, did it plan sensibly (right tools, right order), and did it carry out each action correctly.
+  - It scores each stage separately: did the agent understand the goal, did it plan sensibly (right tools, right order), and did it carry out each action correctly. The test set's expected tools are what each run is compared against.
   - That shows *where* a wrong answer went wrong. *Example it caught:* on "both" questions the agent sometimes searched all agreements instead of filtering to the named loan. We fixed it with the "always filter by `mambu_loan_id`" instruction.
 - **LLM-as-a-Judge groundedness:**
   - A second LLM (Large Language Model) scores each contract answer from 0 to 1 on whether every statement is supported by the retrieved passages.
+  - **How the judge gets context:** its prompt holds the question, the passages search actually returned (saved in the agent's trace), and the agent's answer. It splits the answer into claims and checks each one against the passages. It needs no loan knowledge of its own.
+  - *Example:* the answer says "12.5% per year, fixed, with a 2% late fee." The passages say nothing about a late fee. 2 of 3 claims are supported, so the score is 0.67.
   - A change only ships with an average of at least 0.9 (confirm).
+- **The difference:** GPA checks the steps the agent took; groundedness checks the final answer against its sources.
 - **Release gate:** the full test set runs in CI (Continuous Integration) before any change to the agent, semantic view, or search service reaches production.
 - **In production:** Snowflake's agent monitoring records each request's plan, tool calls, and timing. We review failed and slowest requests weekly.
 

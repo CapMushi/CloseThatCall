@@ -206,6 +206,7 @@ Snowflake's Cortex Agent evaluations use the GPA (Goal–Plan–Action) framewor
 - [CREATE AGENT](https://docs.snowflake.com/en/sql-reference/sql/create-agent)
 - [Use Cortex Search with Cortex Agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-search/cortex-search-agents)
 - [Build agents for Snowflake CoWork](https://docs.snowflake.com/en/user-guide/snowflake-cortex/snowflake-cowork/build-agents)
+- [Streamlit in Snowflake: migrating between runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/migrations-and-upgrades/runtime-migration)
 - [Snowflake CoWork explained (Atlan)](https://atlan.com/know/snowflake/snowflake-cowork/)
 - [Cortex Analyst](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst)
 - [CREATE SEMANTIC VIEW](https://docs.snowflake.com/en/sql-reference/sql/create-semantic-view)
