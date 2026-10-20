@@ -16,3 +16,4 @@ Current rule files:
 - `project-stories/fintech/RULES.md`
 - `augment/RULES.md`
 - `augment/snowflake-cortex-genai/RULES.md`
+- `first-round-story/RULES.md`
