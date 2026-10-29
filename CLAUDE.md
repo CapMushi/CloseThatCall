@@ -16,4 +16,5 @@ Current rule files:
 - `project-stories/fintech/RULES.md`
 - `augment/RULES.md`
 - `augment/snowflake-cortex-genai/RULES.md`
+- `augment/computer-vision-pytorch/RULES.md`
 - `first-round-story/RULES.md`

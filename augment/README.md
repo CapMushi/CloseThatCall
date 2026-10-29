@@ -5,5 +5,6 @@ Optional, JD (Job Description)-specific extensions that bolt onto an existing `p
 One subfolder per augment topic, named after the technology/theme, e.g.:
 
 - `snowflake-cortex-genai/` — Snowflake Cortex, RAG (Retrieval-Augmented Generation), and Cortex Agents, bolted onto `project-stories/fintech/` (Gold layer plus a new loan-agreement document source)
+- `computer-vision-pytorch/` — a PyTorch vision model that spots edited bank statements uploaded with loan applications, before the loan is approved in Mambu (stage 1: one file)
 
 Read `RULES.md` before creating or editing any file here.

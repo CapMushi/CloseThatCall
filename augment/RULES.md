@@ -6,7 +6,11 @@ Read before creating or editing any file here.
 - One subfolder per augment topic, named after the technology/theme (e.g. `snowflake-cortex-genai/`), not after the company or the JD.
 - Every augment file opens with which project-story and which layer/file it attaches to, and why it attaches there (for example: "Attaches on top of the Gold layer in `project-stories/fintech/01-pipeline-overview.md`, giving finance and risk natural-language access to the same certified tables"). Never assume the reader already has the base pipeline in mind.
 - Each augment subfolder has its own `RULES.md` holding that topic's specific structure and decisions (file list, use cases, fixed names). This file holds only the rules that apply to every augment.
-- Each augment subfolder has two kinds of files:
+- **Stages per JD:**
+  - **Stage 1:** a new JD starts as one short file in its own subfolder, with only four sections: problem statement, the pipeline that solves it (one diagram), an explanation, and a user story. Nothing else.
+  - **Stage 2:** if that interview progresses, the subfolder grows into the full layout below, like `snowflake-cortex-genai/`.
+  - **Stage 3:** if it's refined further, it can become its own project story.
+- At full size, each augment subfolder has two kinds of files:
   - **Story files:** the capability told as part of the project, end to end, numbered in reading order. The first one carries the architecture: attachment point, which pipeline layer each piece sits in, and one diagram.
   - **One interview Q&A file:** short questions and answers on JD topics the story doesn't use, so nothing the JD lists is left uncovered.
 - Keep files tight: enough to explain and defend every decision in an interview, no padding. Concrete beats long.
