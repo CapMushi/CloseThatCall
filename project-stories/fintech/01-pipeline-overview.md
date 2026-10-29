@@ -32,6 +32,7 @@ flowchart LR
 
     ORCH[Orchestration: Airflow]
     GOV[Data quality and governance]
+    MON[Monitoring: Datadog]
 
     S1 --> I1
     S2 --> I2
@@ -50,6 +51,7 @@ flowchart LR
 
     GOV -.->|checks, access control| L2
     GOV -.->|checks, access control| W1
+    MON -.->|watches, alerts| L2
 ```
 
 ## What each block is
@@ -60,5 +62,6 @@ flowchart LR
 - **Processing** — the Spark/Databricks jobs that turn Bronze into Silver: matching customer IDs across systems, converting time zones, removing duplicates.
 - **Warehouse (Gold, Snowflake + dbt)** — the business-ready tables: the agreed, single definition of revenue, active customers, loan exposure, and so on, built with dbt.
 - **Serving** — Tableau dashboards that finance, risk, and leadership actually read.
-- **Orchestration (Airflow)** — runs every scheduled step in the right order, retries failures, and alerts when something breaks. It doesn't hold data itself, which is why it sits off to the side.
+- **Orchestration (Airflow)** — runs every scheduled step in the right order (pulls, Databricks processing jobs, the dbt Gold build, then the Tableau refresh), retries failures, and alerts when something breaks. It doesn't hold data itself, which is why it sits off to the side.
 - **Data quality & governance** — checks that stop bad data before it reaches Gold, plus who is allowed to see what. Also off to the side, because it applies across the pipeline rather than being one step in it.
+- **Monitoring (Datadog)** — watches every layer, both "did the jobs run?" and "is the data fresh and right?", and pages on-call or posts to Slack when something breaks (`07`). Off to the side, like orchestration and governance.

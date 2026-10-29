@@ -14,8 +14,6 @@ Suggested file breakdown (adjust stages to match the real pipeline):
 - `05-storage-warehouse-<tech>.md` — e.g. `05-storage-warehouse-snowflake.md`
 - `06-serving-analytics-<tech>.md`
 - `07-monitoring-observability-<tech>.md`
-- `08-challenges-tradeoffs.md` — decisions made, alternatives considered, what you'd do differently
-
 Diagrams use Mermaid (fenced ` ```mermaid ` code blocks) directly inside the markdown file — no separate diagram files. VS Code renders them with the Markdown Preview Mermaid Support extension; GitHub renders them natively.
 
 Link back to relevant `domains/` and `tech-stack/` notes instead of duplicating that content here.

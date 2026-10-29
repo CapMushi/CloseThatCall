@@ -12,6 +12,26 @@ This layer is where data lives at each stage. Bronze and Silver are files in the
 | Bronze | `s3://company-raw/<source>/date=.../` | As received: JSON (JavaScript Object Notation), CSV, Parquet from the CDC (Change Data Capture) sink | 7 years (confirm) |
 | Silver | `s3://company-silver/<table>/` | Delta tables (`03-processing-spark-databricks.md`) | Current state, plus 30 days of history |
 
+- **The folders, source by source (confirm).** Bronze answers "what did each source send, and when?", so it's organised by source, then table or feed, then date:
+  ```
+  s3://company-raw/
+    payments/transactions/date=2026-02-14/part-0001.parquet   ← CDC, written continuously
+    payments/refunds/date=2026-02-14/...
+    payments/chargebacks/date=2026-02-14/...
+    mambu/loans/date=2026-02-14/hour=14/run=1400/...           ← hourly pulls
+    netsuite/ledger/date=2026-02-14/run=0100/...               ← daily
+    adyen/settlements/date=2026-02-15/settlement_2026-02-14.csv
+    salesforce/accounts/date=2026-02-14/run=0130/...
+    persona/checks/date=2026-02-14/webhook/... and reconciliation/...   ← narrower access role
+  ```
+  Silver answers "what's the clean, current truth about each business thing?", so it has one Delta table per folder, not split by source or date:
+  ```
+  s3://company-silver/
+    transactions/  refunds/  chargebacks/   (from payments)
+    settlements/   (Adyen)    ledger/ (NetSuite)    loans/ (Mambu)
+    customers/     (Salesforce + Mambu + payments + Persona, combined)
+  ```
+
 - **A "table" on S3 is just files.** S3 only stores files. `silver.transactions` is really a folder of data files plus a small index folder saying which files make up the table right now:
   ```
   s3://company-silver/transactions/
@@ -103,16 +123,18 @@ flowchart LR
     LED --> REV
 ```
 
-Every fact table also links to `dim_date` (one row per day, with month, quarter, and fiscal period). It's left out of the picture to keep it readable.
+Every fact table also links to `dim_date` (one row per day, with month, quarter, fiscal period, and the Eastern business date finance uses for "a day"). It's left out of the picture to keep it readable.
 
 | Gold table | Grain | Built from (Silver) | Plain meaning, with Jane's example |
 |---|---|---|---|
 | `fct_payments` | One payment | `silver.transactions` + `silver.refunds` + `silver.settlements` | Every payment with money in, refund, Adyen fee, and net. T-1001: \$100 gross, \$5 refund, \$3 fee, \$92 net |
 | `fct_loan_balance_daily` | One loan, one day | `silver.loans` | A daily snapshot of every loan: how much is still owed, how late. L-778 on 28 Feb: \$49,410 owed, 0 days late |
+| `fct_loan_fees` | One fee charged on a loan, or its refund | `silver.loans` (Mambu) | Lending revenue: origination and late fees. E.g. a \$475 fee refunded on 28 Feb (see `06`) |
 | `fct_ledger_lines` | One ledger line | `silver.ledger` (NetSuite) | Accounting's official book entries, including the line booking Jane's payment |
 | `dim_customer` | One customer | `silver.customers` | One card per customer: C-000981, Jane's Bakery LLC, small business, joined March 2025 |
 | `dim_loan` | One loan | `silver.loans` | One card per loan: L-778, \$50,000, 12.5%, 48 months |
-| `mart_revenue_monthly` | One month, one product | `fct_payments` + `fct_ledger_lines` | **The certified revenue number**, checked against accounting. February card payments include Jane's \$92 and match NetSuite |
+| `mart_revenue_monthly` | One month, one product | `fct_payments` + `fct_loan_fees` + `fct_ledger_lines` | **The certified revenue number**, checked against accounting. February card payments include Jane's \$92 and match NetSuite |
+| `mart_kpis_monthly` | One month | `fct_payments` + `fct_loan_balance_daily` | The other two certified headline numbers: **active customers** (at least one settled payment in the last 90 days) and **default rate** (share of loans 90+ days late) (confirm both definitions) |
 | `payments_intraday` | One payment, today only | `silver.transactions` | **Provisional** gross volume and payment counts, refreshed every 15 minutes (see below) |
 
 **The tables in detail.** Each table's columns, and the key columns that link them:
@@ -122,7 +144,9 @@ erDiagram
     dim_customer ||--o{ fct_payments : "customer_id"
     dim_customer ||--o{ dim_loan : "customer_id"
     dim_loan ||--o{ fct_loan_balance_daily : "loan_id"
+    dim_loan ||--o{ fct_loan_fees : "loan_id"
     fct_payments }o--|| mart_revenue_monthly : "summed into"
+    fct_loan_fees }o--|| mart_revenue_monthly : "summed into"
     fct_ledger_lines }o--|| mart_revenue_monthly : "summed into"
 
     dim_customer {
@@ -155,6 +179,13 @@ erDiagram
         date balance_date
         number outstanding
         number days_past_due
+    }
+    fct_loan_fees {
+        string fee_id PK
+        string loan_id FK
+        string fee_type
+        date fee_date
+        number amount
     }
     fct_ledger_lines {
         string ledger_line_id PK
@@ -279,6 +310,6 @@ Sample rows (illustrative, confirm):
     - **The fix:** on close day we take a **zero-copy clone** of Gold, an instant copy made with one command. It points at the same stored data instead of duplicating it, so it costs almost nothing; only later changes take new space. It's named e.g. `gold_close_2026_02` and made read-only.
     - **Result:** when the auditor asks "what did February say at close?", we open it and show the exact tables finance signed off.
     - **The clone never changes; live Gold does.** A late February refund arriving in March updates live Gold, and finance books it as an adjustment in March rather than rewriting February. The clone answers "what did we sign off?", live Gold answers "what's true now?", and the adjustments explain the difference. "Zero-copy" refers to storage, not content: the clone shares the stored data with live Gold, and Snowflake keeps the old chunks for the clone as live Gold changes, so we only pay for what changed.
-- **KYC/AML (Know Your Customer / Anti-Money Laundering):** identity columns from Persona in `dim_customer` carry Snowflake masking policies. Anyone without the compliance role sees `***MASKED***`, matching the column masks in `03-processing-spark-databricks.md`.
+- **KYC/AML (Know Your Customer / Anti-Money Laundering):** identity columns from Persona in `dim_customer` carry Snowflake masking policies. Anyone without the compliance role sees `***MASKED***`, matching the column masks in `03-processing-spark-databricks.md`. Those Databricks masks don't travel with the files when Snowflake reads Silver in place, so the `silver` schema in Snowflake is readable only by the dbt service account. People only ever query Gold, where Snowflake's own masking applies.
 - **PCI-DSS (Payment Card Industry Data Security Standard):** Gold holds only card tokens and the last 4 digits, never full card numbers. That keeps Snowflake out of the card-data audit.
 - **Access by role (RBAC, Role-Based Access Control):** finance, risk, and analysts each get a role that can read the Gold marts they need. Write access belongs only to the service accounts.

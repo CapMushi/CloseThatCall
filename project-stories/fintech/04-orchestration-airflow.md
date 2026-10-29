@@ -13,7 +13,7 @@
 
 ## DAG structure and scheduling
 
-All schedules are in UTC (Coordinated Universal Time), so daylight-saving changes never shift a run (confirm times).
+All schedules are in UTC (Coordinated Universal Time), so daylight-saving changes never shift a run (confirm times). Each vendor DAG is that source's whole chain, not just its Silver step: its pull lands the data in Bronze, then its Databricks job builds Silver. `payments_silver` has no pull, because CDC fills Bronze outside Airflow.
 
 | DAG | Schedule | What it runs, in order |
 |---|---|---|
@@ -48,6 +48,8 @@ flowchart LR
 - **Gold waits for data, not for a clock.** `gold_daily_build` is scheduled on the four daily Silver datasets. If Adyen's files land late, Gold simply starts later, instead of building at a fixed 05:00 on half the data. The hourly and 15-minute sources don't gate it; Gold uses their latest successful run.
 - **Deadline:** finance needs Gold and the dashboards by 06:00 Eastern (confirm). A deadline alert fires if `gold_daily_build` hasn't finished by then, so on-call hears about it before finance does. This is the SLA (Service Level Agreement) from the glossary in practice.
 - **One run at a time:** every DAG has `max_active_runs = 1` and `catchup = False`. Each run reads everything new since its bookmark, so after an outage one run catches up fully; there's no need to replay every missed slot (see Gotchas).
+  - `max_active_runs` applies per DAG: it stops two `payments_silver` runs overlapping, not Mambu and NetSuite running side by side.
+  - Catchup with parallel runs suits a different design: each run handles only its own date and writes its own date folder (e.g. backfilling a new daily report one day per run, 5 days at a time). Our jobs read by bookmark into one shared table, so parallel runs would read the same data and collide.
 - **Vendor rate limits:** all Mambu tasks share an Airflow pool (a cap on how many tasks may run at once) of 2 slots, keeping us under Mambu's ~10 requests/second limit (confirm), whatever else is running.
 
 The core settings, abridged:
@@ -64,8 +66,8 @@ with DAG("gold_daily_build", schedule=[SILVER_NETSUITE, SILVER_SALESFORCE,
 
 ## Failure handling, retries, and alerting
 
-- **Retries first:** every task retries 3 times with growing gaps (exponential backoff), because most failures are temporary: a vendor API timing out, or a Databricks cluster taking too long to start.
-- **Tasks are safe to re-run (idempotent):** pulls land in new run-stamped folders, and Silver uses `MERGE` (`02`, `03`). So a retry or a manual re-run can never double-load data.
+- **Retries first:** every task retries 3 times with growing gaps (exponential backoff), because most failures are temporary: a vendor API timing out, or a Databricks cluster taking too long to start. If a run still fails, the next scheduled run starts on time anyway. The failed run never moved the bookmark, so the next one also picks up its data.
+- **Tasks are safe to re-run (idempotent):** pulls land in new run-stamped folders, and Silver uses `MERGE` (`02`, `03`). So a retry or a manual re-run can never double-load data. The upsert alone isn't what makes it safe. The `MERGE` sets values instead of adding to them, and only replaces a row when the incoming copy is newer (higher LSN (Log Sequence Number) for Payments, later last-modified time for vendor pulls). *Example:* Silver holds `L-778` at \$4,800, last modified 14:00. A retry re-reads that same copy, or the older \$5,000 from 13:00, and both are skipped.
 - **A wrong row count is a failure, not a success.** Each pull's row-count check (`02`) fails its task when the count is far outside the recent average, so the downstream Silver job and Gold don't run on bad data.
 - **dbt tests decide whether Gold publishes:**
   - Tests with `severity: error`, such as "transaction IDs are unique," fail the build. Tableau then isn't refreshed, and dashboards keep yesterday's trusted numbers rather than showing wrong ones.
@@ -84,8 +86,8 @@ with DAG("gold_daily_build", schedule=[SILVER_NETSUITE, SILVER_SALESFORCE,
   - **What happened:** an early version of `gold_daily_build` ran at a fixed 05:00. On a US bank holiday, Adyen's settlement files arrived at 07:30. Gold built without that day's processor fees, and the 06:00 dashboards overstated net revenue for one day before anyone noticed.
   - **Fix:** Gold is now scheduled on the Silver datasets, so it waits for the data. If Adyen still hasn't arrived by the deadline, Gold publishes everything else, marks settlement-based figures as "awaiting settlement data" on the dashboard, and pages on-call, rather than showing a confident wrong number.
 - **Catch-up stampede.**
-  - **What happened:** `payments_silver` was paused for 6 hours during a maintenance window. With `catchup = True` (the old default), un-pausing launched all 24 missed 15-minute runs at once. They started 24 Databricks clusters at the same time, which spiked cost, and they competed to write to the same Silver table, so several failed on write conflicts.
-  - **Fix:** `catchup = False` and `max_active_runs = 1` on every DAG. Since each run reads everything new since its bookmark, the first run after un-pausing catches up fully on its own.
+  - **What happened:** `payments_silver` was paused for 6 hours during a maintenance window. With `catchup = True` (the old default), un-pausing created a run for each of the 24 missed 15-minute slots, and up to 16 (Airflow's default `max_active_runs`) started at once. No run had finished to move the bookmark, so they all read the same 6 hours of data. 16 Databricks clusters doing identical work spiked cost. They also all wrote to `silver.transactions` at once, so Delta rejected the clashing commits and several runs failed. The data stayed correct; the damage was cost and failed runs.
+  - **Fix:** `catchup = False` and `max_active_runs = 1` on every DAG. Since each run reads everything new since its bookmark, the first run after un-pausing reads all 6 hours (~1.25 million transactions, spread across Spark's workers) and moves the bookmark. The next run is back to a normal 15-minute batch.
 
 ## Compliance and security
 
