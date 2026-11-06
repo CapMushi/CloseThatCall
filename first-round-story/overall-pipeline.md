@@ -85,7 +85,7 @@ flowchart LR
 
 ## 5. Semantic layer: automatic reports and APIs
 
-- **What it is:** one shared dictionary of business metrics on top of Gold. "Net revenue = payments − refunds − fees" is written once, in **Cube** (confirm). Jane's \$100 payment with a \$5 refund and \$3 fee is \$92 everywhere, because there's only one formula.
+- **What it is:** one shared dictionary of business metrics on top of Gold. "Net revenue = our fee − Adyen's fee" is written once, in **Cube** (confirm). Jane's \$100 payment, where we charge her \$3 and Adyen charges us \$2.10, earns us \$0.90 everywhere, because there's only one formula.
 - **Automatic reports:** Tableau workbooks use the semantic layer's metrics instead of hand-typed formulas. Airflow refreshes them when Gold is ready, so the month-end pack that took analysts about 3 days (confirm) now builds itself.
 - **APIs (Application Programming Interfaces)** let other software ask for the same metrics over the web:
   - **REST (Representational State Transfer):** a fixed web address per question, e.g. "this merchant's net revenue for February." Simple and easy to cache.
@@ -107,8 +107,8 @@ flowchart LR
 2. **14:02:01** — CDC puts it on Event Hubs.
 3. **14:02:02** — it's scored: 0.03, normal.
 4. **14:02:05** — it's visible in ADX.
-5. **Overnight** — it reaches Gold as \$92 net.
-6. **Next morning** — the same \$92 appears in Tableau, the monthly report, and the merchant's app.
+5. **Overnight** — it reaches Gold: \$0.90 net revenue for us, and \$92 for Jane after a \$5 refund and our \$3 fee.
+6. **Next morning** — the same numbers appear in Tableau and the monthly report (\$0.90), and in Jane's merchant app (her \$92).
 
 A stolen card would score about 0.94 at step 3 and alert risk within seconds.
 

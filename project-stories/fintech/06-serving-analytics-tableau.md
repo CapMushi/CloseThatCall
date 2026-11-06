@@ -42,8 +42,8 @@ The three leadership KPIs are exactly the "one certified definition each" from t
 
 **What each one looks like in practice (illustrative, confirm):**
 - **Finance:** on 3 March, closing February, the dashboard has one row per product.
-  - **Card payments** match (\$1,842,310 on both sides), so there's nothing to do.
-  - **Lending fees** are \$475 apart (ours \$211,940, NetSuite \$212,415), so finance clicks that row. It opens the Gold rows behind the gap, not Mambu: the fee and refund records (which came from Mambu through the pipeline) next to the matching NetSuite ledger lines.
+  - **Card payments** match (\$41,842,310 on both sides), so there's nothing to do.
+  - **Lending** (interest and fees) is \$475 apart (ours \$32,211,940, NetSuite \$32,212,415), so finance clicks that row. It opens the Gold rows behind the gap, not Mambu: the fee and refund records (which came from Mambu through the pipeline) next to the matching NetSuite ledger lines.
   - **The cause, a timing difference:** two systems recorded the same refund on different days.
     - **Mambu** issued the \$475 fee refund at 23:30 on 28 Feb and recorded it that day. Our pipeline copied it, so in Gold it's February.
     - **NetSuite** isn't connected to Mambu. Each morning an accountant loads Mambu's daily fee report into NetSuite as one summary entry, after reviewing it. That report stops at 23:00 (confirm), so the refund went into the 1 March report, and NetSuite dated it 1 March.
@@ -54,7 +54,7 @@ The three leadership KPIs are exactly the "one certified definition each" from t
   - The groups are 0–29, 30–59, 60–89, and 90+. 90+ is usually treated as default, unlikely to be repaid (confirm our definition), and the share of loans in it drives the default rate.
   - Filtering to small businesses shows \$1.2M owed on 84 loans that are 30+ days late.
   - Tom's Tacos isn't in that group yet, but it can be watched.
-- **Leadership:** three tiles with trend lines. Net revenue \$2.05M (up 4% on January), active customers 410,112 (up 1.2%), default rate 2.3% (flat).
+- **Leadership:** three tiles with trend lines. Net revenue \$74.1M (up 4% on January), active customers 410,112 (up 1.2%), default rate 2.3% (flat).
 - **Risk and operations:** payments per 15 minutes today. 3,412 between 14:00 and 14:15 is normal (the usual range is 3,000–3,800). A drop to 900 at 14:30 shows an Adyen outage within 15 minutes.
 - **Analysts:** someone builds "net revenue from customers who joined in 2025, by month."
   - They may build any chart, filter, or formula, but only from the certified data sources, which sit on the Gold marts. Never from Silver or raw tables.
@@ -70,7 +70,7 @@ The three leadership KPIs are exactly the "one certified definition each" from t
     - Data engineering creates one **published data source** per Gold mart, e.g. "Revenue (Certified)," connected to `mart_revenue_monthly`, with "Net revenue" and "Gross payment volume" already defined.
     - It's saved on Tableau Cloud, where everyone can *use* it but only data engineering can *change* it.
     - It carries Tableau's **Certified** badge, meaning "this is the official one."
-  - **For an analyst:** they pick it from a list, drag "Net revenue" onto a chart, and automatically get the number where Jane's payment counts as \$92. There's nothing to type and nothing to get wrong.
+  - **For an analyst:** they pick it from a list, drag "Net revenue" onto a chart, and automatically get the number where Jane's payment counts as \$0.90. There's nothing to type and nothing to get wrong.
   - **Why it's the last step:** Gold fixed the definitions in the warehouse. Certified data sources stop dashboards from redefining them at the very end.
 - **Extracts for certified dashboards, live only for "today."**
   - Certified dashboards read **extracts**: Tableau's own snapshot of the data, which acts as a cache. Gold changes once a night, so a nightly extract is just as fresh, and every click is fast and free on the Snowflake side.
@@ -95,7 +95,7 @@ The three leadership KPIs are exactly the "one certified definition each" from t
 - **"Data as of" on every dashboard.** Each one shows when its data was last refreshed (e.g. "Data as of 17 Feb 2026, 05:12 ET"). Nobody has to guess whether they're looking at today's numbers.
 - **Provisional is labelled as provisional.** The today's-payments dashboard carries a banner: "Provisional: gross volume only. Certified figures tomorrow by 06:00." People can use the fresh numbers without mistaking them for the official ones.
 - **From any number down to the payments behind it.**
-  - Finance can click a revenue figure and see the individual `fct_payments` rows behind it, e.g. February card payments → Jane's T-1001 at \$92.
+  - Finance can click a revenue figure and see the individual `fct_payments` rows behind it, e.g. February card payments → Jane's T-1001 at \$0.90.
   - That's how an auditor's "prove this number" question is answered in minutes (problem #4).
 - **Row-level security: people see only their rows.**
   - A small entitlements table in Gold lists which user may see which customers. For example, a relationship manager sees only their own portfolio.
@@ -115,7 +115,7 @@ The three leadership KPIs are exactly the "one certified definition each" from t
     1. A product analyst built a workbook, "Product Weekly," connected straight to `fct_payments` instead of the certified data source.
     2. In it they created a calculated field named **"Revenue,"** adding up the **gross** amount and ignoring refunds and fees. Jane's payment counted as \$100 there.
     3. It was useful, so it was shared widely, including with leadership.
-    4. Leadership then had two dashboards side by side: "Product Weekly" said February revenue was \$2.18M (gross), and the certified KPI page said \$2.05M (net).
+    4. Leadership then had two dashboards side by side: "Product Weekly" said February revenue was \$4.9B (gross payment volume), and the certified KPI page said \$74.1M (net).
     5. The CFO (Chief Financial Officer) asked, "which one is right?", the exact question the platform was built to end.
   - **The cause:** the data wasn't wrong. A formula inside one workbook quietly redefined "revenue." It was problem #1 all over again, just one layer later.
   - **Fix:**

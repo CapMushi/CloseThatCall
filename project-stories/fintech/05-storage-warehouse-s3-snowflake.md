@@ -71,7 +71,6 @@ In Snowflake, the Silver tables are registered as Iceberg tables in a `silver` s
 
 **Where we *do* copy into Snowflake:**
 - **Building Gold** writes transformed data into Snowflake's own storage, for speed.
-- **Small reference files,** like finance's CSV mapping products to accounts, are uploaded to S3 and loaded with Snowflake's `COPY INTO` command (confirm).
 - **If Silver couldn't be read in place,** the standard tool would be **Snowpipe**, Snowflake's auto-loader, which copies each new S3 file into a table as it lands.
 
 ## Warehouse: Gold in Snowflake
@@ -101,7 +100,7 @@ In Snowflake, the Silver tables are registered as Iceberg tables in a `silver` s
 - **Dimension tables** hold the context around them.
 - Each fact table has a stated **grain**: what exactly one row means. It tells you how the numbers may be added up.
   - In `fct_loan_balance_daily`, one row is one loan on one day.
-  - **Summing across loans** for one day is right: on 28 Feb, L-778 owes \$49,410 and L-905 owes \$18,300, so \$67,710 is owed in total.
+  - **Summing across loans** for one day is right: on 28 Feb, L-778 owes \$50,000 and L-905 owes \$18,300, so \$68,300 is owed in total.
   - **Summing across days** is wrong: each loan appears once per day, so "total owed in February" would come out about 28 times too big. A balance is a snapshot, so across time you take one day (e.g. month-end) or an average.
   - Payments are different: each row is a separate event, so summing across days is fine.
 - **Name prefixes:**
@@ -125,111 +124,51 @@ flowchart LR
 
 Every fact table also links to `dim_date` (one row per day, with month, quarter, fiscal period, and the Eastern business date finance uses for "a day"). It's left out of the picture to keep it readable.
 
-| Gold table | Grain | Built from (Silver) | Plain meaning, with Jane's example |
+| Gold table | Grain | Built from (Silver) | What it is, with Jane's example, and how it differs |
 |---|---|---|---|
-| `fct_payments` | One payment | `silver.transactions` + `silver.refunds` + `silver.settlements` | Every payment with money in, refund, Adyen fee, and net. T-1001: \$100 gross, \$5 refund, \$3 fee, \$92 net |
-| `fct_loan_balance_daily` | One loan, one day | `silver.loans` | A daily snapshot of every loan: how much is still owed, how late. L-778 on 28 Feb: \$49,410 owed, 0 days late |
-| `fct_loan_fees` | One fee charged on a loan, or its refund | `silver.loans` (Mambu) | Lending revenue: origination and late fees. E.g. a \$475 fee refunded on 28 Feb (see `06`) |
-| `fct_ledger_lines` | One ledger line | `silver.ledger` (NetSuite) | Accounting's official book entries, including the line booking Jane's payment |
-| `dim_customer` | One customer | `silver.customers` | One card per customer: C-000981, Jane's Bakery LLC, small business, joined March 2025 |
-| `dim_loan` | One loan | `silver.loans` | One card per loan: L-778, \$50,000, 12.5%, 48 months |
-| `mart_revenue_monthly` | One month, one product | `fct_payments` + `fct_loan_fees` + `fct_ledger_lines` | **The certified revenue number**, checked against accounting. February card payments include Jane's \$92 and match NetSuite |
-| `mart_kpis_monthly` | One month | `fct_payments` + `fct_loan_balance_daily` | The other two certified headline numbers: **active customers** (at least one settled payment in the last 90 days) and **default rate** (share of loans 90+ days late) (confirm both definitions) |
-| `payments_intraday` | One payment, today only | `silver.transactions` | **Provisional** gross volume and payment counts, refreshed every 15 minutes (see below) |
+| `fct_payments` | One payment | `silver.transactions` + `silver.refunds` + `silver.settlements` | Every card payment we process for a merchant. T-1001: Jane's customer paid \$100. We charged Jane \$3.00, Adyen charged us \$2.10, so we earned **\$0.90**. Jane's later \$5 refund only changes what she keeps (\$92); we keep our fee (confirm).<br><br>**Differs from** `payments_intraday`: certified and nightly, with refunds and fees. From `fct_ledger_lines`: our record of each payment, while the ledger is accounting's separate record. |
+| `fct_loan_balance_daily` | One loan, one day | `silver.loans` | A daily photo of every loan: how much is owed, how late. L-778 on 28 Feb: \$50,000 owed, 0 days late (signed 16 Feb, first repayment in March).<br><br>**Differs from** `fct_loan_income`: a state, so never summed across days. From `dim_loan`: what's owed today, not what was agreed. |
+| `fct_loan_income` | One interest or fee charge on a loan, or its refund | `silver.loans` (Mambu) | Lending revenue: interest on each repayment date (the main part), origination and late fees, and refunds. Jane paid a \$1,000 origination fee on L-778.<br><br>**Differs from** `fct_loan_balance_daily`: money we earn, summed into revenue, not money still owed. |
+| `fct_ledger_lines` | One ledger line | `silver.ledger` (NetSuite) | Accounting's official book: one amount posted to one account (e.g. 4000 Card fee revenue), as **daily totals per product**. Jane's \$3.00 fee is inside the 15 Feb card-fee line of \$4.48M.<br><br>**Differs from** `fct_payments`: the same money recorded by accounting, so the two are compared by month and product, not payment by payment. |
+| `dim_customer` | One customer | `silver.customers` | One card per customer (a new row only when a tracked detail changes, see type 2 below). C-000981: Jane's Bakery LLC, small business, joined March 2025.<br><br>**Differs from** `dim_loan`: who the customer is; one customer can have several loans. |
+| `dim_loan` | One loan | `silver.loans` | One card per loan, with terms fixed at signing. L-778: \$50,000, 12.5%, 48 months. These numbers describe the loan (to filter and group, e.g. "loans over \$25,000"), so they belong in a dimension.<br><br>**Differs from** `fct_loan_balance_daily`: what was agreed, not what's owed today. |
+| `mart_revenue_monthly` | One month, one product | `fct_payments` + `fct_loan_income` + `fct_ledger_lines` | **The certified revenue number**, checked against accounting. February card payments include Jane's \$0.90 and match NetSuite.<br><br>**Differs from** `mart_kpis_monthly`: money, checked against NetSuite; the KPI mart holds counts and rates, with no accounting version to check. |
+| `mart_kpis_monthly` | One month | `fct_payments` + `fct_loan_balance_daily` | The other two headline numbers: **active customers** (a settled payment in the last 90 days) and **default rate** (share of loans 90+ days late on the month's last day) (confirm both). Jane is active (paid 15 Feb); L-778 is healthy (0 days late).<br><br>**Differs from** `mart_revenue_monthly`: see that row. |
+| `payments_intraday` | One payment, today only | `silver.transactions` | **Provisional** gross volume and payment counts, refreshed every 15 minutes (see below). T-1001 appears at 13:52 on 14 Feb as \$100, pending.<br><br>**Differs from** `fct_payments`: no refunds, fees, or net, and never certified; the next night the same payment is in `fct_payments`. |
 
-**The tables in detail.** Each table's columns, and the key columns that link them:
 
 ```mermaid
-erDiagram
-    dim_customer ||--o{ fct_payments : "customer_id"
-    dim_customer ||--o{ dim_loan : "customer_id"
-    dim_loan ||--o{ fct_loan_balance_daily : "loan_id"
-    dim_loan ||--o{ fct_loan_fees : "loan_id"
-    fct_payments }o--|| mart_revenue_monthly : "summed into"
-    fct_loan_fees }o--|| mart_revenue_monthly : "summed into"
-    fct_ledger_lines }o--|| mart_revenue_monthly : "summed into"
+%%{init: {'themeCSS': 'td, th { border: 1px solid #999; padding: 2px 6px; white-space: nowrap; font-size: 12px; } table { border-collapse: collapse; margin-top: 4px; }'}}%%
+flowchart TB
+    CUST["<b>dim_customer</b><table><tr><th>customer_id</th><th>business_name</th><th>segment</th><th>valid_from</th><th>valid_to</th></tr><tr><td>C-000981</td><td>Jane's Bakery LLC</td><td>small business</td><td>2025-03-02</td><td>2026-06-01</td></tr><tr><td>C-000981</td><td>Jane's Bakery LLC</td><td>mid-market</td><td>2026-06-01</td><td>(current)</td></tr><tr><td>C-001544</td><td>Tom's Tacos LLC</td><td>small business</td><td>2024-08-10</td><td>(current)</td></tr></table>"]
+    INTRA["<b>payments_intraday</b> (today only, provisional)<table><tr><th>txn_id</th><th>customer_id</th><th>created_at</th><th>gross</th><th>status</th></tr><tr><td>T-1001</td><td>C-000981</td><td>2026-02-14 13:52</td><td>100.00</td><td>pending</td></tr><tr><td>T-1002</td><td>C-001207</td><td>2026-02-14 13:58</td><td>40.00</td><td>pending</td></tr></table>"]
+    LOAN["<b>dim_loan</b><table><tr><th>loan_id</th><th>customer_id</th><th>principal</th><th>rate_pct</th><th>term_months</th><th>status</th></tr><tr><td>L-778</td><td>C-000981</td><td>50,000.00</td><td>12.5</td><td>48</td><td>active</td></tr><tr><td>L-905</td><td>C-001544</td><td>20,000.00</td><td>14.0</td><td>24</td><td>active</td></tr></table>"]
+    INC["<b>fct_loan_income</b><table><tr><th>income_id</th><th>loan_id</th><th>income_type</th><th>income_date</th><th>amount</th></tr><tr><td>F-3301</td><td>L-778</td><td>origination_fee</td><td>2026-02-16</td><td>1,000.00</td></tr><tr><td>I-5102</td><td>L-905</td><td>interest</td><td>2026-02-16</td><td>213.50</td></tr><tr><td>F-4410</td><td>L-905</td><td>late_fee</td><td>2026-02-21</td><td>25.00</td></tr><tr><td>F-4498</td><td>L-612</td><td>fee_refund</td><td>2026-02-28</td><td>−475.00</td></tr></table>"]
+    BAL["<b>fct_loan_balance_daily</b><table><tr><th>loan_id</th><th>balance_date</th><th>outstanding</th><th>days_past_due</th></tr><tr><td>L-778</td><td>2026-02-16</td><td>50,000.00</td><td>0</td></tr><tr><td>L-778</td><td>2026-02-28</td><td>50,000.00</td><td>0</td></tr><tr><td>L-905</td><td>2026-02-16</td><td>18,300.00</td><td>0</td></tr><tr><td>L-905</td><td>2026-02-28</td><td>18,300.00</td><td>12</td></tr></table>"]
+    PAY["<b>fct_payments</b><table><tr><th>txn_id</th><th>customer_id</th><th>settled_date</th><th>gross</th><th>refund</th><th>our_fee</th><th>processor_fee</th><th>net_revenue</th></tr><tr><td>T-1001</td><td>C-000981</td><td>2026-02-15</td><td>100.00</td><td>5.00</td><td>3.00</td><td>2.10</td><td>0.90</td></tr><tr><td>T-1002</td><td>C-001207</td><td>2026-02-15</td><td>40.00</td><td>0.00</td><td>1.20</td><td>0.84</td><td>0.36</td></tr></table>"]
+    LED["<b>fct_ledger_lines</b> (NetSuite, daily totals)<table><tr><th>ledger_line_id</th><th>posting_date</th><th>account</th><th>product</th><th>amount</th></tr><tr><td>NS-55012</td><td>2026-02-15</td><td>4000 Card fee revenue</td><td>card_payments</td><td>4,480,000.00</td></tr><tr><td>NS-55013</td><td>2026-02-15</td><td>5100 Processor fees</td><td>card_payments</td><td>−2,985,700.00</td></tr><tr><td>NS-56200</td><td>2026-02-16</td><td>4200 Loan interest</td><td>lending</td><td>1,148,600.00</td></tr><tr><td>NS-58120</td><td>2026-03-01</td><td>4110 Loan fee refunds</td><td>lending</td><td>−475.00</td></tr></table>"]
+    KPI["<b>mart_kpis_monthly</b><table><tr><th>month</th><th>active_customers</th><th>open_loans</th><th>loans_90_plus</th><th>default_rate</th></tr><tr><td>2026-01</td><td>405,249</td><td>498,200</td><td>11,460</td><td>2.3%</td></tr><tr><td>2026-02</td><td>410,112</td><td>500,000</td><td>11,500</td><td>2.3%</td></tr></table>"]
+    REV["<b>mart_revenue_monthly</b><table><tr><th>month</th><th>product</th><th>net (platform)</th><th>net (ledger)</th><th>difference</th><th>status</th></tr><tr><td>2026-02</td><td>card_payments</td><td>41,842,310.00</td><td>41,842,310.00</td><td>0.00</td><td>reconciled</td></tr><tr><td>2026-02</td><td>lending</td><td>32,211,940.00</td><td>32,212,415.00</td><td>−475.00</td><td>explained: timing</td></tr></table>"]
 
-    dim_customer {
-        string customer_id
-        string business_name
-        string segment
-        date valid_from
-        date valid_to
-    }
-    fct_payments {
-        string txn_id PK
-        string customer_id FK
-        string product
-        date settled_date
-        number amount_gross
-        number refund_amount
-        number processor_fee
-        number net_amount
-    }
-    dim_loan {
-        string loan_id PK
-        string customer_id FK
-        number principal
-        number rate_pct
-        number term_months
-        string status
-    }
-    fct_loan_balance_daily {
-        string loan_id FK
-        date balance_date
-        number outstanding
-        number days_past_due
-    }
-    fct_loan_fees {
-        string fee_id PK
-        string loan_id FK
-        string fee_type
-        date fee_date
-        number amount
-    }
-    fct_ledger_lines {
-        string ledger_line_id PK
-        date posting_date
-        string account
-        string product
-        number amount
-        string source_ref
-    }
-    mart_revenue_monthly {
-        string month
-        string product
-        number net_revenue_platform
-        number net_revenue_ledger
-        number difference
-        string status
-    }
+    CUST -->|customer_id| LOAN
+    LOAN -->|loan_id| INC
+    LOAN -->|loan_id, every day| BAL
+    CUST -->|customer_id| PAY
+    INTRA -->|overnight, once settled: certified| PAY
+    BAL -->|month-end day: default rate| KPI
+    PAY -->|active customers| KPI
+    KPI ~~~ REV
+    INC -->|amount summed| REV
+    PAY -->|net_revenue summed| REV
+    LED -->|summed, then compared| REV
 ```
 
-(PK, primary key: the column that identifies each row. FK, foreign key: a column pointing to another table's key. A payment joins to the customer version valid on its date. Every date column also links to `dim_date`.)
-
-Sample rows (illustrative, confirm):
-
-| `fct_payments` | txn_id | customer_id | product | settled_date | gross | refund | fee | net |
-|---|---|---|---|---|---|---|---|---|
-| | T-1001 | C-000981 | card_payments | 2026-02-15 | 100.00 | 5.00 | 3.00 | 92.00 |
-| | T-1002 | C-001207 | card_payments | 2026-02-15 | 40.00 | 0.00 | 1.20 | 38.80 |
-
-| `fct_ledger_lines` | ledger_line_id | posting_date | account | amount | source_ref |
-|---|---|---|---|---|---|
-| | NS-55012 | 2026-02-15 | 4000 Revenue | 100.00 | T-1001 |
-| | NS-55013 | 2026-02-15 | 5100 Processor fees | −3.00 | T-1001 |
-| | NS-57001 | 2026-02-20 | 4010 Refunds | −5.00 | T-1001 |
-
-| `mart_revenue_monthly` | month | product | net (platform) | net (ledger) | difference | status |
-|---|---|---|---|---|---|---|
-| | 2026-02 | card_payments | 1,842,310.00 | 1,842,310.00 | 0.00 | reconciled |
-
 - **The certified revenue model is the heart of problem #1.**
-  - `mart_revenue_monthly` computes net revenue once: gross − refunds − Adyen fees. Jane's \$100 payment counts as \$92.
+  - `mart_revenue_monthly` computes net revenue once. For card payments it's our fee − Adyen's fee: Jane's \$100 payment earns us \$0.90. The \$100 is gross payment volume, mostly Jane's money, and her \$92 after the refund and our fee is what she keeps; neither is our revenue. For lending it's interest + fees − refunds.
   - It then compares that month's total with NetSuite's ledger. Any gap must be explained by a known timing difference (e.g. a refund booked in the next month). Anything larger fails a dbt test.
   - Finance signed off this model, and that sign-off is what "certified" means.
   - **Why not just take revenue from NetSuite?**
-    - The ledger is summarised and has no customer or segment detail, while product and risk need to drill down to payments.
+    - The ledger holds daily totals with no customer or segment detail, while product and risk need to drill down to payments.
     - It arrives once a day and is adjusted during close.
     - Two independent sources agreeing is the check itself: when they differ, something is broken (a missing refund, a payment never booked), and we find it at close instead of an auditor finding it.
 - **Fresh data during the day (provisional, not certified).**
@@ -284,16 +223,16 @@ Sample rows (illustrative, confirm):
 - **Incremental models.** dbt can build a table two ways:
   - **Full rebuild:** recompute it from all of Silver every night. That's fine for small tables like `dim_loan` (500,000 rows).
   - **Incremental:** keep the existing table and only process what's **new or changed**. That's essential for `fct_payments` (about 1.8 billion rows a year, confirm), where a nightly rebuild would be slow and expensive.
-  - **How "changed" is found:** each Silver row has a `last_changed` time. Each night dbt takes payments that changed since the last build: today's new payments, *plus* older payments that got a refund or settlement today. It inserts the new ones and updates the changed ones (`MERGE`). *Example:* T-1001 was paid on 14 Feb and refunded on 20 Feb, so on the 20 Feb build it counts as changed and its row goes from \$97 to \$92.
+  - **How "changed" is found:** each Silver row has a `last_changed` time. Each night dbt takes payments that changed since the last build: today's new payments, *plus* older payments that got a refund or settlement today. It inserts the new ones and updates the changed ones (`MERGE`). *Example:* T-1001 was paid on 14 Feb, got Adyen's \$2.10 fee from the 15 Feb settlement file, and was refunded \$5 on 20 Feb, so it counts as changed on each of those builds and its row is updated each time.
   - **Lookback window:** a safety margin. dbt reprocesses everything changed in the last **3 days** (confirm), not just since exactly the last build, to catch rows that arrived late or slipped past a failed run. Re-merging them is harmless, because `MERGE` never duplicates.
 - **Clustering:** Snowflake stores a table in many small chunks. If February's payments were scattered across every chunk, a February query would open them all. Clustering `fct_payments` by settlement date keeps each day's payments together, so a February query opens only February's chunks. It's like filing receipts in folders by date instead of in one box; the same idea as the date folders in Bronze.
 - **Tableau extracts:** Tableau can either ask Snowflake *live* on every filter click (a query, and a cost, each time) or keep its own snapshot, an *extract*. An extract works like Tableau's own cache, refreshed on our schedule. We refresh extracts once after each nightly build, so clicks read Tableau's copy: faster, and free on the Snowflake side. Gold changes only once a day, so the extract is just as fresh.
 
 ## Gotchas (confirm — illustrative until matched to a real incident)
 
-- **Late refunds didn't reach Gold.**
-  - **What happened:** the first version of the incremental `fct_payments` model chose rows by *payment date*: "payments made since the last build." Jane's \$5 refund on 20 Feb belonged to a 14 Feb payment, so it was never picked up, and the row stayed at \$97 instead of \$92. February's net revenue came out slightly high, and the reconciliation test caught the gap with NetSuite at close.
-  - **Fix:** the model now chooses rows by *last changed* time (of the payment, its refund, or its settlement) with a 3-day safety window, as described under Incremental models. A refund weeks later still updates its payment, because the refund itself changes that day.
+- **Late Adyen fees didn't reach Gold.**
+  - **What happened:** the first version of the incremental `fct_payments` model chose rows by *payment date*: "payments made since the last build." Adyen's \$2.10 fee for T-1001 arrived in the 15 Feb settlement file, but the payment was made on 14 Feb, so it was never picked up, and the row kept \$3.00 of net revenue instead of \$0.90. Every payment's Adyen fee arrives a day later like this, so February's net revenue came out far too high, and the reconciliation test caught the gap with NetSuite at close.
+  - **Fix:** the model now chooses rows by *last changed* time (of the payment, its refund, or its settlement) with a 3-day safety window, as described under Incremental models. A settlement or refund days later still updates its payment, because that change itself happens that day.
 
 ## Compliance and security
 
