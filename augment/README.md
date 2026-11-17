@@ -6,5 +6,6 @@ One subfolder per augment topic, named after the technology/theme, e.g.:
 
 - `snowflake-cortex-genai/` — Snowflake Cortex, RAG (Retrieval-Augmented Generation), and Cortex Agents, bolted onto `project-stories/fintech/` (Gold layer plus a new loan-agreement document source)
 - `computer-vision-pytorch/` — a PyTorch vision model that spots edited bank statements uploaded with loan applications, before the loan is approved in Mambu (stage 1: one file)
+- `dfir-incident-response/` — Digital Forensics and Incident Response: investigating a stolen Snowflake login (infostealer on an analyst laptop) through a 4-phase pipeline of collect, triage, analyse and report (two files)
 
 Read `RULES.md` before creating or editing any file here.

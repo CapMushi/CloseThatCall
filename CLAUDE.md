@@ -17,4 +17,5 @@ Current rule files:
 - `augment/RULES.md`
 - `augment/snowflake-cortex-genai/RULES.md`
 - `augment/computer-vision-pytorch/RULES.md`
+- `augment/dfir-incident-response/RULES.md`
 - `first-round-story/RULES.md`
