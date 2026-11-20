@@ -48,8 +48,6 @@ This layer is where data lives at each stage. Bronze and Silver are files in the
   - **Mostly one source:** `silver.transactions` (payments database), `silver.refunds`, `silver.settlements` (Adyen), `silver.ledger` (NetSuite), `silver.loans` (Mambu).
 - **Bronze has no table format.** It's files exactly as received (JSON, CSV, Parquet), one folder per source and date. Bronze is only ever added to, never updated, so it doesn't need the index; only Silver, where rows change, does.
 - **Lifecycle rules to control cost:** Bronze moves to cheaper archive storage (S3 Glacier) after 90 days. It's rarely read after that, but must still exist for audits and replays.
-- **Bronze can't be edited:** Bronze has S3 Object Lock turned on, a setting that blocks anyone, even an admin, from changing or deleting files before their retention date. That's what lets us tell an auditor "this is exactly what the source sent us."
-- **Encryption:** all buckets are encrypted with keys managed in AWS KMS (Key Management Service), and access is per role. For example, only the ingestion role can write to Bronze, and the Persona folders have their own narrower role (`02`).
 
 ## Getting Silver into Snowflake without copying it
 
@@ -82,7 +80,7 @@ In Snowflake, the Silver tables are registered as Iceberg tables in a `silver` s
   - **Finance analysts** run checks during month-end close.
   - **Risk** asks ad-hoc exposure questions ("loans 30+ days late, by segment").
   - **Data science** pulls training data.
-- **Why Snowflake:** all of those hit it at once. Snowflake separates storage from compute: each workload gets its own warehouse (see Cost below), so the 08:00 finance dashboards never slow down an analyst's big query. It also has the governance features this story needs: masking, Time Travel, cloning (see Compliance).
+- **Why Snowflake:** all of those hit it at once. Snowflake separates storage from compute: each workload gets its own warehouse (see Cost below), so the nightly build never slows down an analyst's big query. It also has the governance features this story needs: masking, Time Travel, cloning (`08-compliance.md`).
 - **What dbt is:** a tool, not a language; the language is SQL.
   - Each Gold table is a `SELECT` query in its own file, e.g. `mart_revenue_monthly.sql`.
   - dbt works out the build order from which tables each query uses, sends each query to Snowflake (which creates the table), then runs the tests listed next to it.
@@ -172,7 +170,7 @@ flowchart TB
     - It arrives once a day and is adjusted during close.
     - Two independent sources agreeing is the check itself: when they differ, something is broken (a missing refund, a payment never booked), and we find it at close instead of an auditor finding it.
 - **Fresh data during the day (provisional, not certified).**
-  - `00` promises transaction data to analysts within minutes, but certified net revenue can't be final the same day: it needs Adyen's fees and NetSuite's ledger, which arrive once a day.
+  - `01` promises transaction data to analysts within minutes, but certified net revenue can't be final the same day: it needs Adyen's fees and NetSuite's ledger, which arrive once a day.
   - So a small dbt model, `payments_intraday`, rebuilds every 15 minutes from `silver.transactions`, right after each Silver run (`04`). It holds today's gross volume and payment counts only, and is clearly labelled provisional.
   - Certified revenue stays nightly.
 - **dbt layers:**
@@ -205,19 +203,18 @@ flowchart TB
 - **Size:** extra-small, small, medium, and so on. Each step up doubles the machines and the cost: 1, 2, 4 credits an hour.
 - **Credit:** Snowflake's billing unit (price per credit depends on the contract, confirm).
 - **Auto-suspend:** a warehouse switches itself off after 60 seconds with no queries, and back on in about a second when one arrives.
-- **Scale out:** when 100 people open dashboards at 08:00, a warehouse can start extra copies of itself so nobody queues, then shrink back.
 
 | Warehouse (confirm) | Used by | Size | Notes |
 |---|---|---|---|
 | `TRANSFORM_WH` | dbt nightly build | Medium | Runs about 40 minutes a night (≈ 2.7 credits), then pauses |
-| `BI_WH` | Tableau | Small, scales out to 3 copies at the 08:00 peak | Mostly serves extract refreshes |
+| `BI_WH` | Tableau | Small | Extract refreshes after the nightly build, plus the live today's-payments dashboard |
 | `ADHOC_WH` | Analysts | Extra-small | Pauses after 60 seconds idle |
 | `INTRADAY_WH` | The 15-minute `payments_intraday` build | Extra-small | About a minute per run, then pauses |
 
 - **`TRANSFORM_WH` vs `BI_WH`:** think of a kitchen and a dining room.
   - `TRANSFORM_WH` is the kitchen: it *builds* (writes) Gold, with a few heavy jobs overnight.
-  - `BI_WH` is the dining room: it *serves* (reads) many small dashboard requests from many people in the morning.
-  - Keeping them apart means the nightly build never slows the morning, and we can see what each costs.
+  - `BI_WH` is the dining room: it *serves* (reads) Tableau: the extract refreshes and the live today's-payments dashboard.
+  - Keeping them apart means a slow build never slows Tableau, and we can see what each costs.
 - **Pausing:** every warehouse pauses itself after 60 seconds idle, so we don't pay for machines doing nothing.
 - **Resource monitors** are budget alarms on a warehouse. For example, `ADHOC_WH` gets 300 credits a month (confirm): at 80% (240) we get an email, and at 100% Snowflake suspends it. Only ad-hoc can be switched off automatically. Suspending the nightly build or Tableau would break finance's dashboards, so those only send the email.
 - **Incremental models.** dbt can build a table two ways:
@@ -234,21 +231,4 @@ flowchart TB
   - **What happened:** the first version of the incremental `fct_payments` model chose rows by *payment date*: "payments made since the last build." Adyen's \$2.10 fee for T-1001 arrived in the 15 Feb settlement file, but the payment was made on 14 Feb, so it was never picked up, and the row kept \$3.00 of net revenue instead of \$0.90. Every payment's Adyen fee arrives a day later like this, so February's net revenue came out far too high, and the reconciliation test caught the gap with NetSuite at close.
   - **Fix:** the model now chooses rows by *last changed* time (of the payment, its refund, or its settlement) with a 3-day safety window, as described under Incremental models. A settlement or refund days later still updates its payment, because that change itself happens that day.
 
-## Compliance and security
-
-- **SOX (Sarbanes-Oxley Act):**
-  - **Who can write Gold:** only the dbt service account, through the reviewed Git process. No person can edit a Gold table by hand.
-  - **Time Travel:** Snowflake keeps old versions of changed or deleted data for a set period (1 day by default, up to 90 days on its Enterprise edition, confirm ours). Within that window we can:
-    - query a table as it was at a past moment, e.g. "what did the revenue mart show at 09:00 last Monday, when finance read it?";
-    - restore a table after a bad change, e.g. a dbt deploy that wiped a column;
-    - bring back a dropped table.
-    After the window, Snowflake holds a further 7-day emergency backup (Fail-safe) that only its support team can restore.
-  - **Month-end freeze:**
-    - **"Close"** is the first few days of each month, when finance finalises and signs off the previous month's numbers.
-    - **The problem:** February's data can still change afterwards (a late refund, a correction), so Gold's February figures can shift after sign-off. Time Travel reaches back only 90 days, so it can't answer an auditor in July.
-    - **The fix:** on close day we take a **zero-copy clone** of Gold, an instant copy made with one command. It points at the same stored data instead of duplicating it, so it costs almost nothing; only later changes take new space. It's named e.g. `gold_close_2026_02` and made read-only.
-    - **Result:** when the auditor asks "what did February say at close?", we open it and show the exact tables finance signed off.
-    - **The clone never changes; live Gold does.** A late February refund arriving in March updates live Gold, and finance books it as an adjustment in March rather than rewriting February. The clone answers "what did we sign off?", live Gold answers "what's true now?", and the adjustments explain the difference. "Zero-copy" refers to storage, not content: the clone shares the stored data with live Gold, and Snowflake keeps the old chunks for the clone as live Gold changes, so we only pay for what changed.
-- **KYC/AML (Know Your Customer / Anti-Money Laundering):** identity columns from Persona in `dim_customer` carry Snowflake masking policies. Anyone without the compliance role sees `***MASKED***`, matching the column masks in `03-processing-spark-databricks.md`. Those Databricks masks don't travel with the files when Snowflake reads Silver in place, so the `silver` schema in Snowflake is readable only by the dbt service account. People only ever query Gold, where Snowflake's own masking applies.
-- **PCI-DSS (Payment Card Industry Data Security Standard):** Gold holds only card tokens and the last 4 digits, never full card numbers. That keeps Snowflake out of the card-data audit.
-- **Access by role (RBAC, Role-Based Access Control):** finance, risk, and analysts each get a role that can read the Gold marts they need. Write access belongs only to the service accounts.
+Compliance and security for this layer are in `08-compliance.md`.

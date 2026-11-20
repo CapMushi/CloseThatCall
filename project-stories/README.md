@@ -1,6 +1,6 @@
 # Project Stories
 
-One folder per project you can talk about in interviews, named `<domain>-<short-name>/` (e.g. `fintech-fraud-detection/`, `healthcare-claims-pipeline/`).
+One folder per project you can talk about in interviews, named `<domain>/` (e.g. `fintech/`), or `<domain>-<short-name>/` once a domain has more than one (e.g. `healthcare-claims-pipeline/`).
 
 Each story is split across several files by major pipeline tech/stage rather than one giant file — easier to pull just the relevant chunk when a company cares about one part of the stack (e.g. only the Snowflake piece, or only orchestration). Copy `_template/` to start a new one and rename/drop files to match the actual pipeline.
 

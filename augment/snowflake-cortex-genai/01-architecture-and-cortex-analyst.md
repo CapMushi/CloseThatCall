@@ -10,7 +10,7 @@ Gold already holds one certified definition of revenue, loans, and customers, bu
 
 In plain terms: what we built, and which existing problem each piece fixes. The agent isn't a new problem. It's one assistant that uses both use cases together.
 
-| # | Use case | Cortex pieces | Problem it fixes (`00-problem-statement.md`) |
+| # | Use case | Cortex pieces | Problem it fixes (`project-stories/fintech/01-overview.md`) |
 |---|---|---|---|
 | 1 | **Ask Finance** (this file) | Cortex Analyst + a semantic view over Gold | #1 three answers to "how much did we make"; #2 slow, analyst-dependent reporting |
 | 2 | **Loan-agreement documents** (`02-loan-documents-ai-functions-rag.md`) | Cortex AI Functions + Cortex Search (RAG (Retrieval-Augmented Generation)) | #4 hard audits: nobody checks Mambu's typed loan terms against the signed contract |
@@ -61,9 +61,9 @@ flowchart LR
 
 ### The problem, concretely
 
-Finance, product, and risk each used to compute "revenue" differently (`00-problem-statement.md`: Jane's customer's \$100 card payment, on which we charge Jane \$3 and Adyen charges us \$2.10, was "\$100 of revenue" to product and "\$0.90 of revenue" to finance). Gold fixed the definitions. It's a star schema: fact tables hold the events we measure (`gold.fct_payments`, one row per payment), and dimension tables hold their context (`gold.dim_customer`).
+Finance, product, and risk each used to compute "revenue" differently (`project-stories/fintech/01-overview.md`: Jane's customer's \$100 card payment, on which we charge Jane \$3 and Adyen charges us \$2.10, was "\$100 of revenue" to product and "\$0.90 of revenue" to finance). Gold fixed the definitions. It's a star schema: fact tables hold the events we measure (`gold.fct_payments`, one row per payment), and dimension tables hold their context (`gold.dim_customer`).
 
-Gold itself isn't limited to dashboards. Anyone who writes SQL can ask it anything. The limit was people: finance leads who don't write SQL only saw questions someone had already built a Tableau dashboard for. Any new question, such as "net revenue by product for small businesses in Texas last quarter", became a ticket to an analyst, with roughly a 2-day wait (confirm). Cortex Analyst doesn't change Gold; it writes the SQL for those people.
+Gold itself isn't limited to dashboards. Anyone who writes SQL can ask it anything. The limit was people: finance leads who don't write SQL only saw questions someone had already built a Tableau dashboard for. Any new question, such as "card net revenue for small businesses in Texas last quarter", became a ticket to an analyst, with roughly a 2-day wait (confirm). Cortex Analyst doesn't change Gold; it writes the SQL for those people.
 
 One catch: Gold is deterministic (the same SQL always gives the same number), but Cortex Analyst is AI, so the SQL it writes can vary. The semantic view and the accuracy test set below exist to control that.
 
@@ -75,39 +75,41 @@ Think of it as a system prompt for SQL, but stricter in three ways. It holds fix
 
 ### The semantic view we built
 
-`finance_semantic_view` covers three Gold tables: `gold.fct_payments` (one row per transaction), `gold.fct_loan_balance_daily` (one row per loan per day), and `gold.dim_customer` (later also `gold.loan_terms_mismatch`, from `02`). The core of it:
+`finance_semantic_view` covers four Gold tables: `gold.mart_revenue_monthly` (one row per month per product: card payments and lending), `gold.fct_payments` (one row per transaction), `gold.fct_loan_balance_daily` (one row per loan per day), and `gold.dim_customer` (later also `gold.loan_terms_mismatch`, from `02`). The core of it:
 
 ```sql
 CREATE SEMANTIC VIEW finance_semantic_view
-  TABLES (payments AS gold.fct_payments PRIMARY KEY (txn_id),
+  TABLES (revenue AS gold.mart_revenue_monthly PRIMARY KEY (month, product),
+          payments AS gold.fct_payments PRIMARY KEY (txn_id),
           customers AS gold.dim_customer PRIMARY KEY (customer_id))
   RELATIONSHIPS (payments (customer_id) REFERENCES customers)
-  DIMENSIONS (payments.product AS payments.product,
-              payments.settled_month AS DATE_TRUNC('month', payments.settled_at_utc))
+  DIMENSIONS (revenue.product AS revenue.product,
+              revenue.month AS revenue.month,
+              payments.settled_month AS DATE_TRUNC('month', payments.settled_date))
   METRICS (
-    payments.gross_payment_volume AS SUM(payments.amount_gross) WITH SYNONYMS ('GPV', 'sales'),
-    payments.net_revenue AS SUM(payments.our_fee - payments.processor_fee)
-      WITH SYNONYMS ('revenue')
+    revenue.net_revenue AS SUM(revenue.net_platform) WITH SYNONYMS ('revenue'),
+    payments.gross_payment_volume AS SUM(payments.gross) WITH SYNONYMS ('GPV', 'sales'),
+    payments.card_net_revenue AS SUM(payments.our_fee - payments.processor_fee)
   )
   AI_VERIFIED_QUERIES (...);  -- question + SQL pairs copied from the certified dashboards
 ```
 
 Each part has a job:
-- **Tables** are the only tables Analyst may use. Each gets a friendly name, and its primary key tells Analyst what one row is (one payment, one customer).
-- **Relationships** are the only allowed joins: each payment's `customer_id` points to one customer. That's how "net revenue by customer segment" reaches the segment column.
-- **Dimensions** are the columns people can group or filter by, here product and settlement month. Without them, "by product" or "in March" has nothing to attach to.
-- **Metrics** hold the agreed formulas, so `net_revenue` means \$0.90 in the example above for everyone.
+- **Tables** are the only tables Analyst may use. Each gets a friendly name, and its primary key tells Analyst what one row is (one product in one month, one payment, one customer).
+- **Relationships** are the only allowed joins: each payment's `customer_id` points to one customer. That's how "card net revenue by customer segment" reaches the segment column.
+- **Dimensions** are the columns people can group or filter by, here product and month (and settlement month for single payments). Without them, "by product" or "in March" has nothing to attach to.
+- **Metrics** hold the agreed formulas, so `net_revenue` is always the certified total for card payments and lending, and `card_net_revenue` is \$0.90 on Jane's payment for everyone.
 - **Synonyms** map the words people actually type ("GPV", "sales", "revenue") to the right metric. We deliberately made "revenue" mean *net* revenue, the definition finance and leadership signed off on. That is the decision that ends the three-answers problem: a product manager asking for "revenue" now gets net revenue, with the formula shown.
 - **Verified queries** are question-and-SQL pairs copied from the certified dashboards. Analyst uses them as worked examples, and they guarantee the dashboard's questions return the dashboard's numbers.
 
 ### How one question flows
 
 1. A CFO (Chief Financial Officer) asks: "What was net revenue in March by product?"
-2. Cortex Analyst reads `finance_semantic_view`, maps "net revenue" to the `net_revenue` metric, "March" to `settled_month`, and "by product" to `product`, then writes the SQL:
+2. Cortex Analyst reads `finance_semantic_view`, maps "net revenue" to the `net_revenue` metric, "March" to `month`, and "by product" to `product`, then writes the SQL:
    ```sql
-   SELECT product, SUM(our_fee - processor_fee) AS net_revenue
-   FROM gold.fct_payments
-   WHERE DATE_TRUNC('month', settled_at_utc) = '2026-03-01'
+   SELECT product, SUM(net_platform) AS net_revenue
+   FROM gold.mart_revenue_monthly
+   WHERE month = '2026-03-01'
    GROUP BY product;
    ```
 3. The SQL runs on a small Snowflake warehouse (the compute that runs queries) **as the asking user's role**, so every existing permission and column mask still applies.

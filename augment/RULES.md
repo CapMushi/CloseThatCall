@@ -4,7 +4,7 @@ Read before creating or editing any file here.
 
 - This folder holds optional, JD (Job Description)-specific extensions to a pipeline in `project-stories/` — technology a particular interview emphasizes that isn't part of that project's core, deterministic story. This keeps the base story universal and reusable across interviews, while letting prep go deep on whatever stack one specific JD calls out.
 - One subfolder per augment topic, named after the technology/theme (e.g. `snowflake-cortex-genai/`), not after the company or the JD.
-- Every augment file opens with which project-story and which layer/file it attaches to, and why it attaches there (for example: "Attaches on top of the Gold layer in `project-stories/fintech/01-pipeline-overview.md`, giving finance and risk natural-language access to the same certified tables"). Never assume the reader already has the base pipeline in mind.
+- Every augment file opens with which project-story and which layer/file it attaches to, and why it attaches there (for example: "Attaches on top of the Gold layer in `project-stories/fintech/01-overview.md`, giving finance and risk natural-language access to the same certified tables"). Never assume the reader already has the base pipeline in mind.
 - Each augment subfolder has its own `RULES.md` holding that topic's specific structure and decisions (file list, use cases, fixed names). This file holds only the rules that apply to every augment.
 - **Stages per JD:**
   - **Stage 1:** a new JD starts as one short file in its own subfolder, with only four sections: problem statement, the pipeline that solves it (one diagram), an explanation, and a user story. Nothing else.

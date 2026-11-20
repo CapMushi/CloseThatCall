@@ -14,6 +14,7 @@ Every folder that contains content files also has a `RULES.md`. Before creating 
 Current rule files:
 - `tech-stack/RULES.md`
 - `project-stories/fintech/RULES.md`
+- `project-stories/healthcare/RULES.md`
 - `augment/RULES.md`
 - `augment/snowflake-cortex-genai/RULES.md`
 - `augment/computer-vision-pytorch/RULES.md`

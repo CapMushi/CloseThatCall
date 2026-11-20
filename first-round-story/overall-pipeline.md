@@ -8,7 +8,7 @@ A growing fintech had data spread across many systems, so teams got different nu
 
 ## The problem
 
-The original problems still apply (`00-problem-statement.md`). Two of them go one step further here:
+The original problems still apply (`project-stories/fintech/01-overview.md`). Two of them go one step further here:
 - **Late data:** data science had a fraud model, but it only ran overnight. A stolen card used for 30 small test payments in 10 minutes was flagged the next morning.
 - **Reports by hand:** analysts rebuilt the same Tableau workbooks every month. The product team (showing merchants their sales in the app) and data science (getting training data) both had to ask an analyst for spreadsheets.
 

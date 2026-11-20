@@ -23,7 +23,7 @@ There are two kinds of health, and both matter:
 - **Pipeline health:** "did the jobs run?"
 - **Data health:** "is the data fresh and right?"
 
-A pipeline can be all green while the data is wrong. `02`'s NetSuite pull "succeeded" with only 1,000 of about 65,000 rows.
+A pipeline can be all green while the data is wrong. `02`'s NetSuite pull "succeeded" with only its first page of rows.
 
 | Layer | What we watch | Alert when (confirm) |
 |---|---|---|
@@ -46,7 +46,7 @@ A pipeline can be all green while the data is wrong. `02`'s NetSuite pull "succe
 - **How signals reach Datadog:**
   - **Built-in integrations** collect metrics from AWS, Postgres, Kafka, Databricks, and Snowflake.
   - **Our own metrics:** each pull and each dbt run sends a few small metrics of its own, such as rows loaded and table age, tagged by source.
-  - **Logs:** job logs are shipped too. They hold counts and IDs only, never record contents (`04`).
+  - **Logs:** job logs are shipped too. They hold counts and IDs only, never record contents (`08-compliance.md`).
 
 ```mermaid
 flowchart LR
@@ -108,11 +108,4 @@ The "budget" is the number of misses we can afford. If it's used up early, relia
     - a monthly review that deletes alerts nobody acted on.
   - **Result:** the channel dropped to a few messages a day, and people read them again.
 
-## Compliance and security
-
-- **SOX (Sarbanes-Oxley Act):** alert and incident history in Datadog and PagerDuty, plus stored dbt test results, are the evidence that failures in the financial pipeline were detected and handled.
-- **PCI-DSS (Payment Card Industry Data Security Standard) and KYC (Know Your Customer) data:**
-  - Logs sent to Datadog contain counts and IDs only.
-  - Datadog's **Sensitive Data Scanner** is a backstop: it masks anything that looks like a card number before it's stored.
-- **Monitors as code:** monitors are defined in Git through Terraform (a tool that creates cloud settings from reviewed files) and changed only through review. Nobody can quietly switch off an alert.
-- **Retention:** logs stay searchable for 15 days and are archived to S3 for a year (confirm).
+Compliance and security for this layer are in `08-compliance.md`.

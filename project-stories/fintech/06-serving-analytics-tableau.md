@@ -38,7 +38,7 @@ flowchart LR
 | **Risk and operations** | Today's payments | `payments_intraday` | Every 15 minutes | "Is payment volume normal this afternoon?" |
 | **Analysts** | Their own ad-hoc workbooks | Certified data sources only | Nightly | Anything new, using the same certified metrics |
 
-The three leadership KPIs are exactly the "one certified definition each" from the success measures in `00-problem-statement.md`: net revenue, active customers, and default rate.
+The three leadership KPIs are exactly the "one certified definition each" from the success measures in `01-overview.md`: net revenue, active customers, and default rate.
 
 **What each one looks like in practice (illustrative, confirm):**
 - **Finance:** on 3 March, closing February, the dashboard has one row per product.
@@ -76,7 +76,7 @@ The three leadership KPIs are exactly the "one certified definition each" from t
   - Certified dashboards read **extracts**: Tableau's own snapshot of the data, which acts as a cache. Gold changes once a night, so a nightly extract is just as fresh, and every click is fast and free on the Snowflake side.
   - The today's-payments dashboard connects **live** to `payments_intraday`, because that table changes every 15 minutes. It's small (today only), so live queries on `BI_WH` stay cheap.
   - **Clicking never builds anything.** A filter click only reads data that's already there:
-    - **Certified dashboards** read last night's extract (from the successful Gold build at about 05:00).
+    - **Certified dashboards** read last night's extract (from last night's successful Gold build).
     - **The live dashboard** reads `payments_intraday` as of its last 15-minute rebuild.
     - New data arrives only through the pipeline, never because someone clicked.
   - **Two separate Airflow workflows feed these, because they need different data:**
@@ -97,9 +97,6 @@ The three leadership KPIs are exactly the "one certified definition each" from t
 - **From any number down to the payments behind it.**
   - Finance can click a revenue figure and see the individual `fct_payments` rows behind it, e.g. February card payments → Jane's T-1001 at \$0.90.
   - That's how an auditor's "prove this number" question is answered in minutes (problem #4).
-- **Row-level security: people see only their rows.**
-  - A small entitlements table in Gold lists which user may see which customers. For example, a relationship manager sees only their own portfolio.
-  - The certified data sources filter on it automatically, using the signed-in user's name.
 - **Fast by design.**
   - Dashboards read the small, pre-summarised marts, not 1.8 billion payment rows.
   - We keep filters to the ones people actually use.
@@ -110,7 +107,7 @@ The three leadership KPIs are exactly the "one certified definition each" from t
 - **A second "revenue" crept back in.**
   - **First, two terms:**
     - **A workbook** is Tableau's file, like an Excel workbook. It holds sheets (one chart each), dashboards (several sheets on one page), a connection to data, and any formulas the author adds.
-    - **A calculated field** is one of those formulas, typed inside the workbook, e.g. `Revenue = SUM([amount_gross])`.
+    - **A calculated field** is one of those formulas, typed inside the workbook, e.g. `Revenue = SUM([gross])`.
   - **What happened:**
     1. A product analyst built a workbook, "Product Weekly," connected straight to `fct_payments` instead of the certified data source.
     2. In it they created a calculated field named **"Revenue,"** adding up the **gross** amount and ignoring refunds and fees. Jane's payment counted as \$100 there.
@@ -123,13 +120,4 @@ The three leadership KPIs are exactly the "one certified definition each" from t
     - **A monthly automated scan:** Tableau's Metadata API (a way to ask Tableau what's inside every workbook) lists every calculated field. Any field named like "revenue," "GPV," or "active customers" is flagged to its owner.
     - **The outcome here:** the analyst had actually meant gross volume, which already exists as the certified field "Gross payment volume." They swapped it in under its correct name, and the two numbers stopped clashing.
 
-## Compliance and security
-
-- **PCI-DSS (Payment Card Industry Data Security Standard):** no card data reaches Tableau. Only tokens and the last 4 digits exist in Gold, and the data sources don't even include those.
-- **KYC/AML (Know Your Customer / Anti-Money Laundering):** Persona identity columns are masked in Snowflake (`05`) and left out of every Tableau data source, so they can't appear on a dashboard.
-- **SOX (Sarbanes-Oxley Act):**
-  - Every financial figure comes from a certified data source on a tested Gold mart.
-  - Every dashboard shows when its data is from.
-  - Every number can be drilled to its payments.
-  - Only data engineering can publish or change a certified data source.
-- **Access:** people sign in with the company's single sign-on (one login for every work tool), and their Tableau permissions come from their team group. When someone leaves, removing their login removes their access.
+Compliance and security for this layer are in `08-compliance.md`.

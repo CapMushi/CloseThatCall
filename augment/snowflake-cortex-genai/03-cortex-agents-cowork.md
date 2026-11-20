@@ -56,7 +56,7 @@ $$;
 "Of our 10 largest small-business loans, which have an open term mismatch, and what does each agreement say about the rate?"
 
 1. **Plan:** the question has two parts. Largest loans plus mismatch status go to `finance_analyst`; contract wording goes to `loan_agreements`.
-2. **Use tools:** `finance_analyst` writes SQL over the loan-balance and `gold.loan_terms_mismatch` tables. Three of the ten have an open rate mismatch: `L-778`, `L-1203`, `L-2290`.
+2. **Use tools:** `finance_analyst` writes SQL over the loan-balance and `gold.loan_terms_mismatch` tables. Three of the ten have an open rate mismatch: `L-1167`, `L-1203`, `L-2290`.
 3. **Use tools again:** `loan_agreements` is searched three times, each filtered to one loan, for its interest-rate clause.
 4. **Reflect:**
    - The agent checks each passage actually states a rate. For `L-2290`, the top passages were the fee schedule.

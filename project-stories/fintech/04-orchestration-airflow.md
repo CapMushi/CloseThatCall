@@ -13,16 +13,16 @@
 
 ## DAG structure and scheduling
 
-All schedules are in UTC (Coordinated Universal Time), so daylight-saving changes never shift a run (confirm times). Each vendor DAG is that source's whole chain, not just its Silver step: its pull lands the data in Bronze, then its Databricks job builds Silver. `payments_silver` has no pull, because CDC fills Bronze outside Airflow.
+The daily DAGs start after midnight Eastern, once the business day is over. Each vendor DAG is that source's whole chain, not just its Silver step: its pull lands the data in Bronze, then its Databricks job builds Silver. `payments_silver` has no pull, because CDC fills Bronze outside Airflow.
 
 | DAG | Schedule | What it runs, in order |
 |---|---|---|
 | `payments_silver` | Every 15 minutes | Databricks Payments Silver job (`03-processing-spark-databricks.md`). It reads everything new since its bookmark. → dbt build of the provisional `payments_intraday` table (`05`) |
 | `mambu_hourly` | Every hour | Pull Mambu → row-count check → Databricks Silver job for loans |
-| `netsuite_daily` | 01:00 | Pull NetSuite → row-count check → Silver job |
-| `salesforce_daily` | 01:30 | Bulk API (Application Programming Interface) pull → row-count check → Silver job |
-| `adyen_daily` | 02:00 | `SFTPSensor` waits for the settlement files (normally 02:00–04:00) → download with checksum manifest → Silver job |
-| `persona_daily` | 03:00 | 48-hour reconciliation pull → Silver job |
+| `netsuite_daily` | Daily | Pull NetSuite → row-count check → Silver job |
+| `salesforce_daily` | Daily | Bulk API (Application Programming Interface) pull → row-count check → Silver job |
+| `adyen_daily` | Daily | `SFTPSensor` waits for the settlement files → download with checksum manifest → Silver job |
+| `persona_daily` | Daily | 48-hour reconciliation pull → Silver job |
 | `gold_daily_build` | When all daily Silver datasets have updated | `dbt build` in Snowflake (models plus tests) → refresh Tableau extracts |
 
 ```mermaid
@@ -45,7 +45,7 @@ flowchart LR
     GB --> TB
 ```
 
-- **Gold waits for data, not for a clock.** `gold_daily_build` is scheduled on the four daily Silver datasets. If Adyen's files land late, Gold simply starts later, instead of building at a fixed 05:00 on half the data. The hourly and 15-minute sources don't gate it; Gold uses their latest successful run.
+- **Gold waits for data, not for a clock.** `gold_daily_build` is scheduled on the four daily Silver datasets. If Adyen's files land late, Gold simply starts later, instead of building at a fixed time on half the data. The hourly and 15-minute sources don't gate it; Gold uses their latest successful run.
 - **Deadline:** finance needs Gold and the dashboards by 06:00 Eastern (confirm). A deadline alert fires if `gold_daily_build` hasn't finished by then, so on-call hears about it before finance does. This is the SLA (Service Level Agreement) from the glossary in practice.
 - **One run at a time:** every DAG has `max_active_runs = 1` and `catchup = False`. Each run reads everything new since its bookmark, so after an outage one run catches up fully; there's no need to replay every missed slot (see Gotchas).
   - `max_active_runs` applies per DAG: it stops two `payments_silver` runs overlapping, not Mambu and NetSuite running side by side.
@@ -78,22 +78,15 @@ with DAG("gold_daily_build", schedule=[SILVER_NETSUITE, SILVER_SALESFORCE,
 |---|---|
 | A task fails after all retries | Slack `#data-alerts` |
 | `gold_daily_build` fails, or the 06:00 deadline is missed | Page to on-call (PagerDuty) |
-| A sensor times out (e.g. no Adyen files by 06:00) | Page to on-call; Gold proceeds as in Gotcha 1 |
+| A sensor times out (e.g. no Adyen files by 06:00) | Page to on-call; Gold keeps waiting (Gotcha 1) |
 
 ## Gotchas (confirm — illustrative until matched to a real incident)
 
 - **A late file published incomplete revenue.**
-  - **What happened:** an early version of `gold_daily_build` ran at a fixed 05:00. On a US bank holiday, Adyen's settlement files arrived at 07:30. Gold built without that day's processor fees, and the 06:00 dashboards overstated net revenue for one day before anyone noticed.
-  - **Fix:** Gold is now scheduled on the Silver datasets, so it waits for the data. If Adyen still hasn't arrived by the deadline, Gold publishes everything else, marks settlement-based figures as "awaiting settlement data" on the dashboard, and pages on-call, rather than showing a confident wrong number.
+  - **What happened:** an early version of `gold_daily_build` ran at a fixed time each night. On a US bank holiday, Adyen's settlement files arrived hours late. Gold built without that day's processor fees, and the morning dashboards overstated net revenue for one day before anyone noticed.
+  - **Fix:** Gold is now scheduled on the Silver datasets, so it waits for the data. If Adyen still hasn't arrived by the deadline, on-call is paged and the dashboards keep yesterday's numbers, rather than showing a confident wrong number.
 - **Catch-up stampede.**
   - **What happened:** `payments_silver` was paused for 6 hours during a maintenance window. With `catchup = True` (the old default), un-pausing created a run for each of the 24 missed 15-minute slots, and up to 16 (Airflow's default `max_active_runs`) started at once. No run had finished to move the bookmark, so they all read the same 6 hours of data. 16 Databricks clusters doing identical work spiked cost. They also all wrote to `silver.transactions` at once, so Delta rejected the clashing commits and several runs failed. The data stayed correct; the damage was cost and failed runs.
   - **Fix:** `catchup = False` and `max_active_runs = 1` on every DAG. Since each run reads everything new since its bookmark, the first run after un-pausing reads all 6 hours (~1.25 million transactions, spread across Spark's workers) and moves the bookmark. The next run is back to a normal 15-minute batch.
 
-## Compliance and security
-
-- **SOX (Sarbanes-Oxley Act):** Airflow's run history records every run of the financial pipelines: when it ran, whether it succeeded, and who triggered or re-ran anything by hand. Auditors can see the nightly NetSuite and Gold runs as evidence the process ran as designed. In production, manual re-runs and task clears are limited to the data-engineering role through Airflow's RBAC (Role-Based Access Control).
-- **Secrets:** API keys and SFTP credentials come from AWS (Amazon Web Services) Secrets Manager through Airflow's secrets backend (`02`). They're never stored in DAG code or in Airflow's own database.
-- **PCI-DSS (Payment Card Industry Data Security Standard) and KYC (Know Your Customer) data:**
-  - Payments data never passes through Airflow; it flows through the CDC connectors.
-  - Vendor pull tasks stream responses straight to S3, without keeping copies on the Airflow workers.
-  - Task logs never print record contents, so no card tokens or Persona identity data end up in Airflow logs.
+Compliance and security for this layer are in `08-compliance.md`.

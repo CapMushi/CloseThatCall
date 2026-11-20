@@ -17,7 +17,7 @@ Plus one Q&A file: `04-cortex-interview-qa.md`.
 
 ## Use cases: exactly two
 
-- **Ask Finance (Cortex Analyst on Gold).** Fixes problem #1 in `00-problem-statement.md`: three different answers to "how much did we make." A semantic view encodes Gold's certified metric definitions, so plain-English questions get the same numbers as the certified dashboards.
+- **Ask Finance (Cortex Analyst on Gold).** Fixes problem #1 in `project-stories/fintech/01-overview.md`: three different answers to "how much did we make." A semantic view encodes Gold's certified metric definitions, so plain-English questions get the same numbers as the certified dashboards.
 - **Loan-agreement documents (Cortex AI Functions + RAG (Retrieval-Augmented Generation)).** Signed loan PDFs are parsed and their key terms extracted, then checked against Mambu with a dbt test. Cortex Search over the agreement text lets a reviewer read what the contract says when a mismatch is flagged.
 - No third use case (no AML investigation agent, no fraud). Anything else the JD asks about goes in the Q&A file.
 

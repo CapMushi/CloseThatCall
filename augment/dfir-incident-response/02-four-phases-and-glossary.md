@@ -72,7 +72,7 @@ ORDER BY event_timestamp;
 
 **What happens:** turn the timeline into something each audience can act on.
 
-- **Power BI dashboard** (reads `case_2026_031.timeline` through Athena):
+- **Power BI dashboard** (reads `case_2026_031.timeline` through Athena). Not finance's Tableau: the security team already has Power BI through Microsoft 365, and case data stays off the finance Tableau site (confirm).
   - a timeline from the 4 Mar download to the 7 Mar lockout;
   - a scope panel showing the hosts, users and tables affected;
   - a status list for each fix.
